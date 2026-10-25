@@ -1,3 +1,5 @@
+import { requestTimeoutSignal } from './requestTimeout.js';
+
 const API_KEY = process.env.GEMINI_API_KEY || '';
 const MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 // Model names drift; a valid key is never sent unless an explicit model is
@@ -26,6 +28,7 @@ export async function runGeminiStage(prompt) {
     const res = await fetch(ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: requestTimeoutSignal(),
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: {

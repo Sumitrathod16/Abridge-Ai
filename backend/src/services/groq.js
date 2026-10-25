@@ -1,3 +1,5 @@
+import { requestTimeoutSignal } from './requestTimeout.js';
+
 const API_KEY = process.env.GROQ_API_KEY || '';
 const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
@@ -34,6 +36,7 @@ export async function runGroqStage(prompt) {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${API_KEY}`,
       },
+      signal: requestTimeoutSignal(),
       body: JSON.stringify(body),
     });
 
