@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AbridgeAI — Project Planning Studio</title>
+    <meta name="description" content="Turn a rough project idea into a structured, feasible, build-ready plan. AbridgeAI runs a planning pipeline behind the scenes and upgrades research, architecture, builder, and brief stages with Gemini when a key is set." />
+    <meta name="theme-color" content="#b6e62c" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AbridgeAI" />
+    <meta property="og:title" content="AbridgeAI — Project Planning Studio" />
+    <meta property="og:description" content="From 'I have an idea' to 'I know exactly what to build.' AbridgeAI turns rough project ideas into structured, feasible, build-ready plans." />
+    <meta name="twitter:card" content="summary" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <script>
+      (function () {
+        var key = "abridgeai.theme.v1";
+        var stored = null;
+        try { stored = localStorage.getItem(key); } catch (e) {}
+        var dark = stored ? stored === "dark" : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.content = dark ? "#151310" : "#b6e62c";
+      })();
+    </script>
+  </head>
+  <body>
+    <noscript>
+      <div style="max-width:560px;margin:40px auto;padding:16px 20px;border-left:4px solid #c2402b;background:#fbf9f3;font-family:sans-serif;font-size:14px;">
+        AbridgeAI needs JavaScript to run the planning pipeline. Please enable JavaScript and reload the page.
+      </div>
+    </noscript>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
