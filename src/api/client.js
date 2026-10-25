@@ -20,9 +20,21 @@ export async function getMeta() {
   return data;
 }
 
-/** Run the full planning pipeline on the backend. Returns { results }. */
+/** Start the planning workflow and return its workflow ID. */
 export function runPlan(input) {
   return post('/api/plan', input);
+}
+
+/** Retrieve durable workflow status and its latest stage results. */
+export async function getWorkflowStatus(workflowId, { signal } = {}) {
+  const res = await fetch(`/api/workflows/${encodeURIComponent(workflowId)}`, { signal });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.ok) {
+    const error = new Error(data?.error || 'Workflow status request failed.');
+    error.status = res.status;
+    throw error;
+  }
+  return data;
 }
 
 /** Ask the backend to render a saved record as a downloadable markdown brief. */

@@ -16,11 +16,17 @@ import { runPlan, exportBrief } from './api/client.js';
 import {
   readHistory, saveToHistory, deleteFromHistory, clearHistory,
   readDraft, clearDraft, readTheme, writeTheme, getSystemTheme,
-  RECORD_VERSION,
+  readLastWorkflow, saveLastWorkflow, RECORD_VERSION,
 } from './utils/storage.js';
 import { downloadFile } from './utils/export.js';
+import { watchWorkflow } from './utils/workflow.js';
 
-const STAGE_KEYS = ['github', 'research', 'feasibility', 'architecture', 'stack', 'builder', 'brief'];
+function stageStatuses(stages = {}) {
+  return Object.fromEntries(Object.entries(stages).map(([key, state]) => [
+    key,
+    state === 'completed' ? 'done' : state,
+  ]));
+}
 
 function modeBadge(mode) {
   if (mode === 'llm') return 'Gemini · live';
@@ -31,18 +37,20 @@ function modeBadge(mode) {
 }
 
 export default function App() {
-  const [view, setView] = useState('landing');
+  const [savedWorkflow] = useState(() => readLastWorkflow());
+  const [view, setView] = useState(() => savedWorkflow ? 'overview' : 'landing');
   const [theme, setTheme] = useState(() => readTheme() || getSystemTheme());
   const [history, setHistory] = useState(() => readHistory());
   const [activeId, setActiveId] = useState(null);
   const [currentProject, setCurrentProject] = useState(null);
-  const [running, setRunning] = useState(false);
+  const [running, setRunning] = useState(() => !!savedWorkflow);
   const [toast, setToast] = useState(null);
 
   // Pipeline state
   const [pipelineState, setPipelineState] = useState('standby');
   const [statuses, setStatuses] = useState({});
   const [results, setResults] = useState(null);
+  const [pipelineErrors, setPipelineErrors] = useState({});
 
   // Form restore
   const [restoreData, setRestoreData] = useState(() => readDraft());
@@ -84,8 +92,78 @@ export default function App() {
   const resetPipeline = () => {
     setStatuses({});
     setResults(null);
+    setPipelineErrors({});
     setPipelineState('standby');
   };
+
+  const monitorWorkflow = useCallback(async (workflow, signal) => {
+    const { workflowId, input } = workflow;
+    try {
+      await watchWorkflow(workflowId, {
+        signal,
+        onProgress(snapshot) {
+          setStatuses(stageStatuses(snapshot.stages));
+          setPipelineErrors(snapshot.errors || {});
+          if (snapshot.status === 'running') {
+            setPipelineState('running');
+            return;
+          }
+
+          const completed = snapshot.status === 'completed';
+          setResults(snapshot.results || null);
+          setPipelineState(completed ? 'complete' : 'failed');
+          setRunning(false);
+
+          if (!completed) {
+            showToast(`Planning workflow ${snapshot.status}.`);
+            return;
+          }
+
+          if (input.idea) {
+            const record = {
+              version: RECORD_VERSION,
+              id: workflowId,
+              workflowId,
+              name: input.name, stack: input.stack, customStack: input.customStack,
+              github: input.github, idea: input.idea, deadline: input.deadline,
+              comfort: input.comfort, type: input.type, team: input.team, audience: input.audience,
+              time: new Date().toLocaleString(),
+              outputs: snapshot.results,
+            };
+            setCurrentProject(record);
+            setActiveId(record.id);
+            if (!readHistory().some(item => item.id === workflowId)) {
+              saveToHistory(record);
+              setHistory(readHistory());
+            }
+            clearDraft();
+          }
+
+          if (Object.keys(snapshot.errors || {}).length) {
+            showToast('Planning finished with stage errors. See the failed stages.');
+          }
+        },
+      });
+    } catch (err) {
+      if (signal?.aborted) return;
+      console.error(err);
+      setRunning(false);
+      showToast('Unable to retrieve workflow progress. The workflow ID is saved for reconnecting.');
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    if (!savedWorkflow) return undefined;
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void monitorWorkflow(savedWorkflow, controller.signal);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [monitorWorkflow, savedWorkflow]);
 
   // ── Pipeline runner (orchestrated by the backend) ───────────
   const runPipeline = async (input) => {
@@ -93,42 +171,20 @@ export default function App() {
     setRunning(true);
     setResults(null);
     setStatuses({});
+    setPipelineErrors({});
     setPipelineState('running');
     setView('overview');
 
     try {
-      const { results: newResults } = await runPlan(input);
-
-      // Reveal completed stages in order so the timeline reads naturally.
-      STAGE_KEYS.forEach((key, i) => {
-        setTimeout(() => setStatuses(prev => ({ ...prev, [key]: 'done' })), i * 140);
-      });
-      setPipelineState('complete');
-      setResults(newResults);
-
-      // Save to history
-      if (input.idea) {
-        const record = {
-          version: RECORD_VERSION,
-          id: Date.now().toString(36),
-          name: input.name, stack: input.stack, customStack: input.customStack,
-          github: input.github, idea: input.idea, deadline: input.deadline,
-          comfort: input.comfort, type: input.type, team: input.team, audience: input.audience,
-          time: new Date().toLocaleString(),
-          outputs: newResults,
-        };
-        setCurrentProject(record);
-        setActiveId(record.id);
-        saveToHistory(record);
-        setHistory(readHistory());
-        clearDraft();
-      }
+      const { workflowId } = await runPlan(input);
+      const workflow = { workflowId, input };
+      saveLastWorkflow(workflow);
+      await monitorWorkflow(workflow);
     } catch (err) {
       console.error(err);
-      showToast('Something went wrong — please try again.');
-      resetPipeline();
-    } finally {
       setRunning(false);
+      showToast('Unable to start the planning workflow. Check the Temporal server and worker.');
+      resetPipeline();
     }
   };
 
@@ -200,8 +256,8 @@ export default function App() {
   })();
 
   // ── Status line ──────────────────────────────────────────────
-  const statusText = running ? 'running pipeline…' : pipelineState === 'complete' ? `complete · ${currentProject?.time || ''}` : 'idle';
-  const statusState = running ? 'running' : pipelineState === 'complete' ? 'done' : 'idle';
+  const statusText = running ? 'running pipeline…' : pipelineState === 'complete' ? `complete · ${currentProject?.time || ''}` : pipelineState === 'failed' ? 'workflow failed' : 'idle';
+  const statusState = running ? 'running' : pipelineState === 'complete' ? 'done' : pipelineState === 'failed' ? 'failed' : 'idle';
 
   if (view === 'landing') {
     return <Landing onEnter={handleEnterFromLanding} />;
@@ -277,26 +333,37 @@ export default function App() {
                 <span id="status-text">{statusText}</span>
               </p>
 
+              {Object.keys(pipelineErrors).length > 0 && (
+                <section className="pipeline-errors" role="alert">
+                  <h2>Planning stage errors</h2>
+                  <ul>
+                    {Object.entries(pipelineErrors).map(([stage, message]) => (
+                      <li key={stage}><strong>{stage}:</strong> {message}</li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
               {results && (
                 <section className="outputs-section" id="outputs-panel">
                   <div className="outputs-head">
                     <h2>Planning results</h2>
                   </div>
                   <div className="outputs" id="outputs">
-                    <OutputCard index={1} title="Builder Signals (GitHub Analysis)" agent="github"
+                    {results.github && <OutputCard index={1} title="Builder Signals (GitHub Analysis)" agent="github"
                       body={results.github.text} badge={results.github.badge}
-                      copyable={results.github.text} onToast={showToast} />
-                    <OutputCard index={2} title="Research & Opportunity Analysis" agent="research"
+                      copyable={results.github.text} onToast={showToast} />}
+                    {results.research && <OutputCard index={2} title="Research & Opportunity Analysis" agent="research"
                       body={results.research?.text ?? results.research} copyable={results.research?.text ?? results.research}
-                      badge={modeBadge(results.research?.mode)} onToast={showToast} />
-                    <FeasibilityCard feasibility={results.feasibility} onToast={showToast} />
-                    <OutputCard index={4} title="Architecture Direction" agent="architecture"
+                      badge={modeBadge(results.research?.mode)} onToast={showToast} />}
+                    {results.feasibility && <FeasibilityCard feasibility={results.feasibility} onToast={showToast} />}
+                    {results.architecture && <OutputCard index={4} title="Architecture Direction" agent="architecture"
                       body={results.architecture?.text ?? results.architecture} copyable={results.architecture?.text ?? results.architecture}
-                      badge={modeBadge(results.architecture?.mode)} onToast={showToast} />
-                    <OutputCard index={5} title="Tech Stack Recommendation" agent="stack"
-                      body={results.stack?.text ?? results.stack} copyable={results.stack?.text ?? results.stack} onToast={showToast} />
-                    <BuilderCard builder={results.builder} onToast={showToast} />
-                    <BriefCard brief={results.brief} onToast={showToast} />
+                      badge={modeBadge(results.architecture?.mode)} onToast={showToast} />}
+                    {results.stack && <OutputCard index={5} title="Tech Stack Recommendation" agent="stack"
+                      body={results.stack?.text ?? results.stack} copyable={results.stack?.text ?? results.stack} onToast={showToast} />}
+                    {results.builder && <BuilderCard builder={results.builder} onToast={showToast} />}
+                    {results.brief && <BriefCard brief={results.brief} onToast={showToast} />}
                   </div>
                 </section>
               )}

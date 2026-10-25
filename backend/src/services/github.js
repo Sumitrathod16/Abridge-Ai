@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { requestTimeoutSignal } from './requestTimeout.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SAMPLE_PATH = path.resolve(__dirname, '../../../public/data/sample-github-analysis.json');
@@ -93,10 +94,14 @@ export async function fetchGitHub(username) {
 
   if (typeof fetch !== 'function') return loadSampleGitHub();
   try {
-    const profileRes = await fetch(`https://api.github.com/users/${encodeURIComponent(user)}`);
+    const profileRes = await fetch(`https://api.github.com/users/${encodeURIComponent(user)}`, {
+      signal: requestTimeoutSignal(),
+    });
     if (!profileRes.ok) throw new Error(`GitHub profile status ${profileRes.status}`);
     const profile = await profileRes.json();
-    const reposRes = await fetch(`https://api.github.com/users/${encodeURIComponent(user)}/repos?per_page=100&sort=updated`);
+    const reposRes = await fetch(`https://api.github.com/users/${encodeURIComponent(user)}/repos?per_page=100&sort=updated`, {
+      signal: requestTimeoutSignal(),
+    });
     const repos = reposRes.ok ? await reposRes.json() : [];
     return {
       source: 'live',

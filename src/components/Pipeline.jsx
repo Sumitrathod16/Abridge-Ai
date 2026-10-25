@@ -49,7 +49,7 @@ export default function Pipeline({ statuses, feasibility, pipelineState }) {
           {stages.map(stage => {
             const state = statuses[stage.key] || 'queued';
             return (
-              <li key={stage.key} className={`tl-row${state === 'running' ? ' is-running' : state === 'done' ? ' is-done' : ''}`} data-step={stage.key}>
+              <li key={stage.key} className={`tl-row${state === 'running' ? ' is-running' : state === 'done' ? ' is-done' : state === 'failed' ? ' is-failed' : ''}`} data-step={stage.key}>
                 <span className="tl-node">
                   <svg viewBox="0 0 12 12" aria-hidden="true">
                     <path d="M2 6l3 3 5-6" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
@@ -62,7 +62,7 @@ export default function Pipeline({ statuses, feasibility, pipelineState }) {
                 </span>
                 <span className="tl-name">{stage.label}</span>
                 <span className="tl-status">
-                  {state === 'running' ? 'in progress' : state === 'done' ? 'completed' : 'pending'}
+                  {state === 'running' ? 'in progress' : state === 'done' ? 'completed' : state === 'failed' ? 'failed' : 'pending'}
                 </span>
               </li>
             );
